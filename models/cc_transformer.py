@@ -18,7 +18,7 @@ OTHER_AGENT = "other_agent"
 
 
 class CentralizedCriticModel(ABC, TFModelV2):
-    """Multi-agent code that implements a centralized VF."""
+    """Multi-agent model that implements a centralized VF."""
 
     def __init__(self, obs_space, action_space, num_outputs, model_config, name):
         super(CentralizedCriticModel, self).__init__(
@@ -68,6 +68,90 @@ class CentralizedCriticModel(ABC, TFModelV2):
         return tf.reshape(self._value_out, [1])  # not used
 
 
+class CcTransformer(CentralizedCriticModel):
+    """Multi-agent model that implements a centralized VF."""
+
+    def _build_actor(
+        self, activation_fn="relu", hidden_layers=[512, 512, 512], **kwargs
+    ):
+        inputs = tf.keras.layers.Input(shape=(self.obs_space_shape,), name="obs")
+        output = build_fullyConnected(
+            inputs=inputs,
+            hidden_layers=hidden_layers,
+            num_outputs=self.act_space_shape,
+            activation_fn=activation_fn,
+            name="actor",
+        )
+
+        return tf.keras.Model(inputs, output)
+
+    def _build_critic(
+        self,
+        activation_fn="relu",
+        hidden_layers=[512, 512, 512],
+        centralized=True,
+        embedding_size=128,
+        num_heads=8,
+        d_model=256,
+        use_scale=True,
+        **kwargs,
+    ):
+        # agent's input
+        agent_obs = tf.keras.layers.Input(shape=(self.obs_space_shape,), name="obs")
+        agent_embedding = build_fullyConnected(
+            inputs=agent_obs,
+            hidden_layers=[2 * embedding_size, embedding_size],
+            num_outputs=embedding_size,
+            activation_fn=activation_fn,
+            name="agent_embedding",
+        )  # `[batch_size, embedding_size]`
+
+        # opponents' input
+        opponent_shape = (
+            (self.obs_space_shape + self.act_space_shape) * self.max_num_opponents,
+        )
+        opponent_obs = tf.keras.layers.Input(shape=opponent_shape, name="other_agent")
+        opponent_input = tf.reshape(
+            opponent_obs,
+            [-1, self.max_num_opponents, self.obs_space_shape + self.act_space_shape],
+        )
+
+        # opponents' embedding
+        # `[batch_size, self.max_num_opponents, embedding_size]`
+        opponent_embedding = build_fullyConnected(
+            inputs=opponent_input,
+            hidden_layers=[2 * embedding_size, embedding_size],
+            num_outputs=embedding_size,
+            activation_fn=activation_fn,
+            name="opponent_embedding",
+        )
+
+        # multi-head attention
+        queries = tf.expand_dims(agent_embedding, axis=1)  # number of queries = 1
+
+        # output shape: `[batch_size, 1, d_model]`
+        opponents_embedding = MultiHeadAttentionLayer(
+            num_heads=num_heads, d_model=d_model, use_scale=use_scale
+        )(
+            [queries, opponent_embedding, opponent_embedding]
+        )  # `[q, k, v]`
+
+        # remove the addtional dimension
+        opponents_embedding = tf.squeeze(opponents_embedding, axis=1)
+
+        # `[batch_size, embedding_size + d_model]`
+        embeddings = tf.concat([agent_embedding, opponents_embedding], axis=-1)
+
+        output = build_fullyConnected(
+            inputs=embeddings,
+            hidden_layers=hidden_layers,
+            num_outputs=1,
+            activation_fn=activation_fn,
+            name="critic",
+        )  # `[batch_size, ]`
+        return tf.keras.Model([agent_obs, opponent_obs], output)
+
+
 def build_fullyConnected(
     inputs, hidden_layers, num_outputs, activation_fn="relu", name=None
 ):
@@ -94,58 +178,6 @@ def build_fullyConnected(
     )(x)
 
     return output
-
-
-class CcConcatenate(CentralizedCriticModel):
-    """Multi-agent code that implements a centralized VF."""
-
-    def _build_actor(
-        self, activation_fn="relu", hidden_layers=[512, 512, 512], **kwargs
-    ):
-        inputs = tf.keras.layers.Input(shape=(self.obs_space_shape,), name="obs")
-
-        output = build_fullyConnected(
-            inputs=inputs,
-            hidden_layers=hidden_layers,
-            num_outputs=self.act_space_shape,
-            activation_fn=activation_fn,
-            name="actor",
-        )
-
-        return tf.keras.Model(inputs, output)
-
-    def _build_critic(
-        self,
-        activation_fn="relu",
-        hidden_layers=[512, 512, 512],
-        centralized=True,
-        **kwargs,
-    ):
-        obs = tf.keras.layers.Input(shape=(self.obs_space_shape,), name="obs")
-        inputs = [obs]
-
-        if centralized:
-            other_agent = tf.keras.layers.Input(
-                shape=(
-                    (self.obs_space_shape + self.act_space_shape)
-                    * self.max_num_opponents,
-                ),
-                name="other_agent",
-            )
-            inputs += [other_agent]
-            input_layer = tf.keras.layers.Concatenate(axis=1)(inputs)
-        else:
-            input_layer = obs
-
-        output = build_fullyConnected(
-            inputs=input_layer,
-            hidden_layers=hidden_layers,
-            num_outputs=1,
-            activation_fn=activation_fn,
-            name="critic",
-        )
-
-        return tf.keras.Model(inputs, output)
 
 
 class MultiHeadAttentionLayer(tf.keras.layers.Layer):
@@ -184,7 +216,7 @@ class MultiHeadAttentionLayer(tf.keras.layers.Layer):
 
         if d_model % self.num_heads != 0:
             raise ValueError(
-                "the code dimension (got {}) must be a multiple "
+                "the model dimension (got {}) must be a multiple "
                 "of the number of heads, got {} heads".format(d_model, num_heads)
             )
 
@@ -243,7 +275,6 @@ class MultiHeadAttentionLayer(tf.keras.layers.Layer):
         k = self._split_heads(k)
         v = self._split_heads(v)
 
-        # TODO - check the shape because I think it will be num_heads * dim_value
         scaled_attention = self.attention_layer([q, k, v])
 
         # Restore the shapes to `[batch_size, Tq, d_model]`
@@ -284,7 +315,7 @@ class MultiHeadAttentionLayer(tf.keras.layers.Layer):
                 )
 
     def get_config(self):
-        config = super(MultiHeadAttentionLayer, self).get_config()
+        config = super(AttentionLayer, self).get_config()
         config.update(
             num_heads=self.num_heads,
             d_model=self.d_model,
@@ -386,7 +417,7 @@ class AttentionLayer(tf.keras.layers.Layer):
 
 
 class CentralizedValueMixin(object):
-    """Add methods to evaluate the central value function from the code."""
+    """Add methods to evaluate the central value function from the model."""
 
     # the sample batch need to be put in a placeholder before
     # being feed to the network, otherwise it will redefine the tensor dimensions
@@ -499,8 +530,6 @@ def loss_with_central_critic(policy, model, dist_class, train_batch):
 
     logits, state = model.from_batch(train_batch)
     action_dist = dist_class(logits, model)
-
-
     policy.central_value_out = policy.model.central_value_function(
         train_batch[SampleBatch.CUR_OBS], train_batch[OTHER_AGENT]
     )
@@ -606,7 +635,7 @@ CCPPOPolicy = PPOTFPolicy.with_updates(
     ],
 )
 register_trainable(
-    "CcConcatenate",
+    "CcTransformer",
     PPOTrainer.with_updates(
         name="CCPPOTrainer", get_policy_class=lambda c: CCPPOPolicy
     ),

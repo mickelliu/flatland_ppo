@@ -17,6 +17,8 @@ from envs.flatland.utils.gym_env_wrappers import AvailableActionsWrapper, SkipNo
     DeadlockWrapper, ShortestPathActionWrapper, DeadlockResolutionWrapper
 from envs.flatland_base import FlatlandBase
 
+from experiment.custom_reward import CustomRewardWrapper
+
 
 class FlatlandSparse(FlatlandBase):
 
@@ -48,19 +50,17 @@ class FlatlandSparse(FlatlandBase):
         )
         if env_config['observation'] == 'shortest_path':
             self._env = ShortestPathActionWrapper(self._env)
+
+        if env_config.get('custom_reward_profile', False):
+            self._env = CustomRewardWrapper(self._env, finished_reward=env_config.get('done_reward', 1),
+                                            not_finished_reward=env_config.get('not_finished_reward', -1),
+                                            deadlock_reward=env_config.get('deadlock_reward', -0.5))
         if env_config.get('sparse_reward', False):
             self._env = SparseRewardWrapper(self._env, finished_reward=env_config.get('done_reward', 1),
                                             not_finished_reward=env_config.get('not_finished_reward', -1))
-        if env_config.get('deadlock_reward', 0) != 0:
+        if env_config.get('check_deadlock', False):
             self._env = DeadlockWrapper(self._env, deadlock_reward=env_config['deadlock_reward'])
-        if env_config.get('resolve_deadlocks', False):
-            deadlock_reward = env_config.get('deadlock_reward', 0)
-            self._env = DeadlockResolutionWrapper(self._env, deadlock_reward)
-        if env_config.get('skip_no_choice_cells', False):
-            self._env = SkipNoChoiceCellsWrapper(self._env, env_config.get('accumulate_skipped_rewards', False),
-                                                 discounting=env_config.get('discounting', 1.))
-        if env_config.get('available_actions_obs', False):
-            self._env = AvailableActionsWrapper(self._env, env_config.get('allow_noop', True))
+
 
     @property
     def observation_space(self) -> gym.spaces.Space:

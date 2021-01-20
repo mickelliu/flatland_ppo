@@ -1,11 +1,10 @@
-# taken from Flatland examples/flatland_2_0_example.py
-width: 100
-height: 100
-number_of_agents: 100
-max_num_cities: 30
+width: 35
+height: 35
+number_of_agents: 20
+max_num_cities: 6
+max_rails_between_cities: 4
+max_rails_in_city: 4
 grid_mode: False
-max_rails_between_cities: 2
-max_rails_in_city: 8
 malfunction_rate: 30
 malfunction_min_duration: 3
 malfunction_max_duration: 20

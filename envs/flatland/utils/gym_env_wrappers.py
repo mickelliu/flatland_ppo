@@ -147,10 +147,9 @@ class SparseRewardWrapper(gym.Wrapper):
 
     def step(self, action_dict: Dict[int, RailEnvActions]) -> StepOutput:
         rail_env: RailEnv = self.unwrapped.rail_env
-
         obs, reward, done, info = self.env.step(action_dict)
-
         o, r, d, i = {}, {}, {}, {}
+
         for agent_id, agent_obs in obs.items():
             o[agent_id] = obs[agent_id]
             d[agent_id] = done[agent_id]
@@ -182,6 +181,7 @@ class DeadlockWrapper(gym.Wrapper):
     def check_deadlock(self): #  -> Set[int]:
         rail_env: RailEnv = self.unwrapped.rail_env
         new_deadlocked_agents = []
+
         for agent in rail_env.agents:
             if agent.status == RailAgentStatus.ACTIVE and agent.handle not in self._deadlocked_agents:
                 position = agent.position
@@ -217,7 +217,6 @@ class DeadlockWrapper(gym.Wrapper):
 
     def step(self, action_dict: Dict[int, RailEnvActions]) -> StepOutput:
         obs, reward, done, info = self.env.step(action_dict)
-
         if self._deadlock_reward != 0:
             new_deadlocked_agents = self.check_deadlock()
         else:
@@ -296,6 +295,7 @@ class ShortestPathActionWrapper(gym.Wrapper):
                 transformed_action_dict[agent_id] = possible_actions_sorted_by_distance(rail_env, agent_id)[action - 1][0]
         step_output = self.env.step(transformed_action_dict)
         return step_output
+
 
     def reset(self, random_seed: Optional[int] = None) -> Dict[int, Any]:
         return self.env.reset(random_seed)

@@ -1,13 +1,10 @@
 import argparse
 import ray
 from ray.tune.config_parser import make_parser
-from ray.cluster_utils import Cluster
 from ray.rllib.utils import merge_dicts
-from ray.tune.logger import TBXLogger
-
-from code.wandblogger import WandbLogger
 
 from envs.flatland import get_eval_config
+
 
 def create_parser(parser_creator=None):
     parser = make_parser(
@@ -15,7 +12,8 @@ def create_parser(parser_creator=None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Train a reinforcement learning agent.",
         epilog="")
-
+    parser.add_argument(
+        "--env", default=None, type=str, help="The gym environment to use.")
     parser.add_argument("-f",
                         "--config-file",
                         default=None,
@@ -46,11 +44,16 @@ def create_parser(parser_creator=None):
         "-e",
         "--eval",
         action="store_true",
-        help="Whether to run evaluation. Default evaluation config is default.yaml "
-        "to use custom evaluation config set (eval_generator:test_eval) under configs")
+        help="Whether to run evaluation. Default evaluation config is small_default.yaml "
+             "to use custom evaluation config set (eval_generator:test_eval) under configs")
     parser.add_argument(
         "--torch",
         action="store_true")
+    parser.add_argument(
+        "-s",
+        "--save-checkpoint",
+        action="store_true",
+        help="Whether the experiment will save the checkpoints to weights and biases")
 
     return parser
 
@@ -77,7 +80,7 @@ def on_episode_end(info):
             episode_done_agents += 1
 
     # Not a valid check when considering a single policy for multiple agents
-    #assert len(episode._agent_to_last_info) == episode_num_agents
+    # assert len(episode._agent_to_last_info) == episode_num_agents
 
     norm_factor = 1.0 / (episode_max_steps * episode_num_agents)
     percentage_complete = float(episode_done_agents) / episode_num_agents
@@ -91,21 +94,13 @@ def on_episode_end(info):
     episode.custom_metrics["episode_num_swaps"] = episode_num_swaps / 2
     episode.custom_metrics["percentage_complete"] = percentage_complete
 
+
 def create_experiment(args, experiments):
 
-    verbose = 1
-    custom_fn = False
-    webui_host = "localhost"
     for exp in experiments.values():
 
         if args.torch:
             exp["config"]["use_pytorch"] = True
-        if args.v:
-            exp["config"]["log_level"] = "INFO"
-            verbose = 2
-        if args.vv:
-            exp["config"]["log_level"] = "DEBUG"
-            verbose = 3
         if args.log_flatland_stats:
             exp['config']['callbacks'] = {'on_episode_end': on_episode_end}
 
@@ -146,7 +141,7 @@ def create_experiment(args, experiments):
             exp['config']['env_config']['save_checkpoint'] = True
         if args.config_file:
             exp['config']['env_config']['yaml_config'] = args.config_file
-        exp['loggers'] = [WandbLogger, TBXLogger]
+        # exp['loggers'] = [WandbLogger, TBXLogger]
 
         # global checkpoint_freq, keep_checkpoints_num, checkpoint_score_attr, checkpoint_at_end
         #
@@ -155,6 +150,10 @@ def create_experiment(args, experiments):
         # checkpoint_score_attr = exp['checkpoint_score_attr']
         # checkpoint_at_end = exp['checkpoint_at_end']
 
-        ray.init(
-            num_gpus=args.ray_num_gpus,
-            webui_host=webui_host)
+    ray.init(
+        num_gpus=args.ray_num_gpus,
+        ignore_reinit_error=True
+        # webui_host=webui_host
+    )
+
+    return experiments

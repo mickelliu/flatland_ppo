@@ -1,0 +1,43 @@
+maddpg-small:
+    run: contrib/MADDPG
+    env: flatland_sparse
+    stop:
+        timesteps_total: 2000000  # 1e7
+    checkpoint_freq: 10
+    checkpoint_at_end: True
+    keep_checkpoints_num: 5
+    checkpoint_score_attr: episode_reward_mean
+    config:
+
+
+        agent_id: 1
+        num_gpus: 1
+
+        env_config:
+            observation: tree
+            observation_config:
+                max_depth: 2
+                shortest_path_max_depth: 30
+
+            sparse_reward: True
+            check_deadlock: True
+            deadlock_reward: -1
+
+            generator: sparse_rail_generator
+            generator_config: small_default
+
+            wandb:
+                project: flatland_test_runs
+                entity:
+                tags: ["small_default", "tree_obs", "MADDPG"]
+
+        model:
+
+            fcnet_activation: relu
+            fcnet_hiddens: [512, 512, 512]
+#            actor_hidden_activation: relu
+#            actor_hiddens: [512, 512, 512]
+#            critic_hidden_activation: relu
+#            critic_hiddens: [512, 512, 512]
+
+
